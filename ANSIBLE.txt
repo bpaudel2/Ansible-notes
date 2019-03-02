@@ -1,0 +1,153 @@
+ANSIBLE:
+It is an automation engine that allows for agentless system configuration and deployment. Ansible operates over SSH and runs Ansible modules on remote systems in order to complete tasks. Ansible is typically installed on a single, lightweight control node where a list of host inventory files, as well as playbooks are kept.
+The heavy lifting is generally performed on the remote host as that is where Ansible Modules are executed. 
+In order to install Ansible, you must configure the EPEL (Extra Package for Enterprise Linux) repository on your system.
+Once the EPEL repository is configured, your package manager installs Ansible and manages the dependencies. 
+sudo yum install ansible
+sudo yum install git //also install git
+
+CONFIGURATION FILES:
+/etc/ansible/ansible.cfg is the primary Ansible configuration file. Notable configurations include: default inventory configuration, default remote user
+/etc/ansible/hosts is the default Ansible Inventory File. 
+An inventory is a list of hosts that Ansible manages.
+Inventory location may be specified as follows:
+­­Default: /etc/ansible/hosts
+Specified by CLI: ansible -i
+can be set in ansible.cfg
+An example of ansible is down below:
+	mail.example.com ansible_port=5566
+
+	[webservers]
+	httpd1.example.com
+	httpd2.example.com
+	
+	[labservers]
+	lab[01:99]
+
+SSH CONISDERATIONS:
+Where it is possible to connect to remote host with Ansible via password authentication using -k (lowercase), it is not common practice as it can cause significant overhead in terms of manual intervention
+Ansible is best implemented using a common user across all Ansible controlled systems.
+The ssh-keygen and ssh-copy-id command can facilitate creating a pre-shared key for user authentication.
+/etc/sudeors may be edited to allow your selected user to sudo any command without a password for the most automated configuration using the line
+ansible ALL=(ALL) NOPASSWD: ALL
+It is also possible to prompt for a sudo password at runtime using -K(uppercase) if desired. Note that this can become a challenge when executing against many system.
+
+
+DOCUMENTATION:
+docs.ansible.com 
+A module index is provided at docs.ansible.com as well. It contains detailed information over each module.
+Ansible ships with the ansible-doc command as well. The command
+specifies a module name as a parameter and provides module specific documentation.
+combined with -1 flag lists installed modules with a brief description.
+AD-HOC:
+Ansible ad-hoc commands and comparable to bash commands. Playbooks are analogous to bash script.
+Syntax: ansible <HOST> -b -m <MODULE> -a "<ARG1 ARG2 ARGN>"
+HOST is host or host group defined in the Ansible inventory file. -b is for become, which replaces depreciated -s flag as in sudo
+Ansible escalates permission to --become-user(default root) using the method defined by --become-method(default sudo)
+-m is for module and allows a command to be used on a module.
+-a allows parameters to pass. If used without a module, it is like running a shell command on the target system(s). 
+COMMON MODULES.
+ping
+setup
+yum "name=<NAME> state=<STATE>"
+service "name=<NAME> state=<STATE>"
+copy "src=<SOURCE_PATH>/
+dest=<ABSOLUTE_DESTINATION_PATH>"
+
+PLAYBOOKS:
+Ansible playbooks are the primary means for Ansible to perform tasks.
+Basic Ansible Playbook Structure
+As ad-hoc commands are to bash commands, playbooks are to bash scripts. Playbooks run using the ansible-playbook command, not the ansible command. You must specify playbook to run as a parameter. 
+Playbooks are written in YAML. Playbooks contain different elements called plays. Plays contain lists of hosts and, at minimum, one task. Each task has a name and module. Modules may have parameters. Pro tip: Spaces matter. Improper indentation can cause a playbook to err in a vague way. 
+SAMPLE PLAYBOOK
+---
+- hosts: webservers
+ become: yes
+tasks:
+- name: latest httpd installed
+ yum:
+	name: httpd
+	state: latest
+- nam: write apache config file
+ template:
+	src: /srv/httpd.j2
+	dest: /etc/httpd.conf
+- hosts: database
+remote_user: root
+tasks:
+- name: latest postgresql installed
+ yum: 
+	name: postgresql
+	state: latest
+- name: postgresql must be started
+ service: 
+	name: postgresql
+	state: started
+ADDITIONAL NOTES ON ANSIBLE PLAYBOOKS:
+Check mode provides a quick sanity check:
+Dry run; does not actully affect systems
+Syntax: ansible-playbook foo.yml --check
+Retry file:
+If playbook fails, a retry file is generated and contains the list of hosts where the playbook failed: playbook-name.retry
+The file may be specified using --limit with the same playbook to reattempt the playbook at a later time.
+
+VARIABLES:
+Varaibles names should be letters, numbers and underscores. They should always start with a letter. Variables can be scoped by a group, host, or within a playbook. Variables may be passed in via command line using the --extra-vars, the -e flag, or defined within a playbook.
+CLI Example:
+ansible-playbook service.yml -e \ "target_hosts=localhost \ target_service=httpd":
+Variables are referenced using double curly braces. It is good practice to wrap variables names in weak quotes:
+hosts: "{{my_host_var}}"
+Example: 
+hosts: webservers
+become: yes
+vars: 
+	target_service: httpd
+	target_state: started
+tasks:
+	-name: Ensure target state
+	service:
+		name: "{{target_service}}"
+		state: "{{target_state}}"
+
+FACTS:
+Ansible facts are simply various properties regarding a given remote system. The setup modeule can retrieve facts. The fileter parameter takes regex to allow you to prune fact output. Facts are gathered by default in the Ansible Playbook execution. The keyword gather_facts may be set in the playbook to change fact gathering behavior. It is possible to print Ansible facts in files using variables. Facts may be filtered using the setup module ad-hoc by passing a value for the filter parameter. The ansible command output may be directed to a file using --tree outputfile flag which may be helpful when working with facts.
+It is possible to use {{ansible_facts}} for conditional plays based on facts. 
+
+TROUBLESHOOTING:
+The debug module may be used to help troubleshoot plays:
+use to print detail information about in-progress plays
+handy for troubleshooting
+Debug takes two primary parameters that are mutually exclusive. 
+msg: a message that is printed to STDOUT
+var: a variable whose content is printed to STDOUT
+Example:
+- debug:
+	msg: "System {{inventory_hostname}} has uuid {{ansible_product_uuid}}"
+The register module is used to store task output. Several attributes are available: retrun code, stderr, and stdout. 
+The following play will store the results of the shell module in a variable named motd_contents:
+	-hosts: all
+	tasks:
+	- shell: cat /etc/motd
+	register: motd_contents
+
+HANDLERS:
+Ansible provides a mechanism that allows an action to be flagged for execution when a task performs a change. By only executing certain tasks during a chnage, plays are more effecient.
+This mechanism is known as a handler in Ansible. A handler may be called using notify keyword:
+-name: template configuration file
+template:
+	src: foo.conf
+	dest: /etc/foo.conf
+notify:
+	-restart mecached
+No matter how many times a handler is flagged in a play, it only runs during a play's final phase. notify will only flag a handler if a task block makes changes.
+A handler may be defined similarly to task:
+handlers:
+	- name: restart memcached
+	service:
+		name: memached
+		state: restarted
+	listen: "restart cache services"
+
+
+	
+	
